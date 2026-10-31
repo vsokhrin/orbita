@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: Тесты (Node.js 22 + PostgreSQL 16)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: orbita
+          POSTGRES_PASSWORD: orbita
+          POSTGRES_DB: orbita_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U orbita -d orbita_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Проверка синтаксиса
+        run: for f in $(find server shared public/js -name '*.js'); do node --check "$f"; done
+      - name: Тесты
+        run: npm test
+        env:
+          TEST_DATABASE_URL: postgres://orbita:orbita@127.0.0.1:5432/orbita_test
+
+  docker:
+    name: Сборка и запуск Docker Compose
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Проверка docker-compose.yml
+        run: docker compose config --quiet
+      - name: Сборка и запуск
+        run: docker compose up -d --build --wait --wait-timeout 180
+      - name: Проверка здоровья
+        run: |
+          curl -fsS http://localhost:8080/api/health
+          curl -fsS http://localhost:8080/ | grep -q 'ОРБИТА'
+      - name: Логи
+        if: always()
+        run: docker compose logs --no-color
+      - name: Остановка
+        if: always()
+        run: docker compose down -v

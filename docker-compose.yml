@@ -1,0 +1,52 @@
+# ОРБИТА: приложение + PostgreSQL.
+# Запуск:  docker compose up -d --build   →   http://localhost:8080
+# Настройки — в файле .env (см. .env.example).
+name: orbita
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-orbita}
+      POSTGRES_USER: ${POSTGRES_USER:-orbita}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-orbita-db-secret}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    networks: [backend]
+
+  app:
+    build: .
+    image: orbita:latest
+    restart: unless-stopped
+    init: true
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgres://${POSTGRES_USER:-orbita}:${POSTGRES_PASSWORD:-orbita-db-secret}@db:5432/${POSTGRES_DB:-orbita}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin2026}
+      SEED_DEMO_USERS: ${SEED_DEMO_USERS:-true}
+      DEMO_MODE: ${DEMO_MODE:-true}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+      SIMULATION: ${SIMULATION:-true}
+      ANOMALY_RATE_PER_HOUR: ${ANOMALY_RATE_PER_HOUR:-0.12}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "${APP_PORT:-8080}:3000"
+    networks: [backend]
+
+volumes:
+  pgdata:
+
+networks:
+  backend:
