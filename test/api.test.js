@@ -85,6 +85,16 @@ t('health и справочники доступны без входа', async (
   assert.equal((await c.get('/api/auth/me')).data.user, null);
 });
 
+t('главная страница отдаётся любому клиенту, без заголовка Accept', async () => {
+  const res = await fetch(base + '/', { headers: { accept: '*/*' } });
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /text\/html/);
+  assert.match(await res.text(), /ОРБИТА/);
+  const asset = await fetch(base + '/css/app.css');
+  assert.equal(asset.status, 200);
+  assert.equal((await fetch(base + '/no-such-file.js')).status, 404);
+});
+
 t('без входа данные закрыты', async () => {
   const c = client();
   for (const p of ['/api/dashboard', '/api/spacecraft', '/api/stream', '/api/users']) assert.equal((await c.get(p)).status, 401, p);

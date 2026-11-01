@@ -50,11 +50,16 @@ export function serveStatic(root, { prefix = '/', immutable = false } = {}) {
     if (req.method !== 'GET' && req.method !== 'HEAD') return false;
     if (!req.path.startsWith(prefix)) return false;
     const rel = req.path.slice(prefix.length);
-    const file = path.resolve(absRoot, '.' + path.posix.normalize('/' + rel));
+    let file = path.resolve(absRoot, '.' + path.posix.normalize('/' + rel));
     if (!file.startsWith(absRoot + path.sep) && file !== absRoot) return false;
     let stat;
     try {
       stat = await fs.promises.stat(file);
+      // для «/» и любой папки отдаём её index.html — независимо от заголовка Accept
+      if (stat.isDirectory()) {
+        file = path.join(file, 'index.html');
+        stat = await fs.promises.stat(file);
+      }
     } catch {
       return false;
     }
