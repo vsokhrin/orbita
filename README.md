@@ -10,7 +10,7 @@
 ## Быстрый старт
 
 ```bash
-git clone https://github.com/<ваш-логин>/orbita.git
+git clone https://github.com/vsokhrin/orbita.git
 cd orbita
 cp .env.example .env        # по желанию: поменять пароли и порт
 docker compose up -d --build
