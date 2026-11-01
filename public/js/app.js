@@ -1,11 +1,12 @@
 // Точка входа клиента: проверка сессии, каркас интерфейса, маршруты, живой поток и уведомления.
 import { h, debounce, replace } from './dom.js';
-import { api, setUnauthorizedHandler } from './api.js';
-import { live } from './live.js';
+import { api, setUnauthorizedHandler, setTransport } from './api.js';
+import { live, setStreamFactory } from './live.js';
+import { DEMO, toApp, toUrl } from './base.js';
 import { state, can, dict, invalidateFleet } from './state.js';
 import { route, startRouter, navigate } from './router.js';
 import { icon, logo } from './ui/icons.js';
-import { lamp, toast } from './ui/components.js';
+import { lamp, toast, confirmDialog } from './ui/components.js';
 import { fmt, initials } from './format.js';
 
 // ---------- тема ----------
@@ -67,8 +68,36 @@ const NAV = [
 ];
 
 const root = document.getElementById('app');
+let demo = null;
+
+/** Демо-версия: «сервер» ЦУП запускается прямо в браузере, данные хранятся в localStorage. */
+async function startDemo() {
+  const mod = await import(new URL('../demo/index.js', import.meta.url).href);
+  demo = await mod.startDemo();
+  setTransport(demo.request);
+  setStreamFactory(demo.openStream);
+  // выгрузки CSV: ссылки ведут на /api/…csv, отдаём файл из демо-сервера
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest?.('a[download]');
+    if (!a || e.button !== 0) return;
+    const url = new URL(a.href, location.href);
+    if (!url.pathname.startsWith('/api/')) return;
+    e.preventDefault();
+    demo.download(url.pathname + url.search).catch((err) => toast({ title: 'Не удалось выгрузить', body: err.message, tone: 'red' }));
+  });
+}
 
 async function boot() {
+  if (DEMO) {
+    replace(root, h('div', { class: 'boot-splash', role: 'status' }, logo(44), h('div', null, 'Запуск ЦУП в браузере…')));
+    try {
+      await startDemo();
+    } catch (err) {
+      console.error(err);
+      replace(root, h('div', { class: 'not-found' }, h('h1', null, 'Демо-версия не запустилась'), h('p', { class: 'muted' }, err.message), h('button', { class: 'btn', onclick: () => location.reload() }, 'Повторить')));
+      return;
+    }
+  }
   try {
     state.meta = await api.get('/api/meta', null, { silent: true });
   } catch (err) {
@@ -93,7 +122,7 @@ async function showLogin(message) {
       message,
       onSuccess: (user) => {
         state.user = user;
-        if (location.pathname === '/login') history.replaceState({}, '', '/');
+        if (toApp(location.pathname) === '/login') history.replaceState({}, '', toUrl('/'));
         mountShell();
       },
     }),
@@ -164,7 +193,7 @@ function mountShell() {
       { class: 'sidebar' },
       h('a', { class: 'brand', href: '/', onclick: closeNav }, logo(30), h('div', null, h('div', { class: 'brand-name' }, 'ОРБИТА'), h('div', { class: 'brand-sub' }, 'Информационная система ЦУП'))),
       navEl,
-      h('div', { class: 'sidebar-foot' }, `Версия ${state.meta.version}`),
+      h('div', { class: 'sidebar-foot' }, DEMO ? demoNote() : `Версия ${state.meta.version}`),
     ),
     h(
       'div',
@@ -241,6 +270,31 @@ function mountShell() {
   });
 }
 
+function demoNote() {
+  return [
+    h('div', null, `Демо-версия ${state.meta.version}. Сервер ЦУП работает в этом браузере, изменения сохраняются только здесь.`),
+    h(
+      'div',
+      { class: 'demo-actions' },
+      h(
+        'button',
+        {
+          type: 'button',
+          class: 'link',
+          onclick: async () => {
+            const ok = await confirmDialog({ title: 'Сбросить демо-данные?', text: 'Все изменения в этом браузере будут удалены, мир ЦУП начнётся заново.', confirmLabel: 'Сбросить', danger: true });
+            if (!ok) return;
+            demo.reset();
+            location.assign(toUrl('/'));
+          },
+        },
+        'Сбросить данные',
+      ),
+      h('a', { href: 'https://github.com/vsokhrin/orbita', target: '_blank', rel: 'noopener' }, 'Исходный код'),
+    ),
+  ];
+}
+
 function buildUserMenu() {
   const u = state.user;
   let open = false;
@@ -274,7 +328,7 @@ function buildUserMenu() {
           } catch {}
           state.user = null;
           invalidateFleet();
-          history.replaceState({}, '', '/');
+          history.replaceState({}, '', toUrl('/'));
           showLogin();
         },
       },

@@ -1,4 +1,5 @@
 // Построение DOM без innerHTML: все строки вставляются как текст, поэтому XSS невозможен.
+import { toUrl } from './base.js';
 
 /**
  * h('div', { class: 'x', onclick: fn, style: { color: 'red' }, dataset: {id: 1} }, 'текст', child, [children])
@@ -19,6 +20,7 @@ export function h(tag, attrs, ...children) {
       else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2).toLowerCase(), v);
       else if (k === 'value' && 'value' in el && !(el instanceof SVGElement)) el.value = v;
       else if (k === 'checked' || k === 'selected' || k === 'disabled' || k === 'indeterminate') el[k] = !!v;
+      else if (k === 'href' && tag === 'a') el.setAttribute('href', toUrl(v)); // маршруты приложения — с учётом подкаталога
       else el.setAttribute(k, v === true ? '' : String(v));
     }
   }

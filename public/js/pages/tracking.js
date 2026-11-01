@@ -8,7 +8,7 @@ import { fmt } from '../format.js';
 import { pageHead, panel, screen, badge, lamp, meter, kv, colorDot, button } from '../ui/components.js';
 import { WorldMap } from '../map/worldmap.js';
 import { mapLegend } from './dashboard.js';
-import { orbitClass } from '/shared/orbit.js';
+import { orbitClass } from '../../shared/orbit.js';
 
 export default async function tracking({ scope, query }) {
   const fleet = await loadFleet(true);

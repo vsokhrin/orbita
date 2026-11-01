@@ -1,5 +1,6 @@
 // Клиентский роутер на History API: маршруты с параметрами, перехват ссылок, жизненный цикл страниц.
 import { Scope } from './dom.js';
+import { BASE, toApp, toUrl } from './base.js';
 
 const routes = [];
 let outlet = null;
@@ -16,22 +17,27 @@ export function route(path, loader, meta = {}) {
 export function startRouter(el, { onChange } = {}) {
   outlet = el;
   onNavigate = onChange;
-  window.addEventListener('popstate', () => render(location.pathname + location.search, { restoreScroll: true }));
+  window.addEventListener('popstate', () => render(toApp(location.pathname) + location.search, { restoreScroll: true }));
   document.addEventListener('click', (e) => {
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     const a = e.target.closest('a[href]');
     if (!a || a.target || a.hasAttribute('download') || a.dataset.external !== undefined) return;
     const url = new URL(a.href, location.href);
     if (url.origin !== location.origin || url.pathname.startsWith('/api/')) return;
+    const path = toApp(url.pathname);
+    if (BASE && path === url.pathname) return; // ссылка за пределы приложения
     e.preventDefault();
-    navigate(url.pathname + url.search);
+    navigate(path + url.search);
   });
-  render(location.pathname + location.search);
+  render(toApp(location.pathname) + location.search);
 }
 
+/** Переход по маршруту приложения; принимает и адрес с подкаталогом (location.pathname). */
 export function navigate(to, { replace = false } = {}) {
-  if (to === location.pathname + location.search) return render(to);
-  history[replace ? 'replaceState' : 'pushState']({}, '', to);
+  to = toApp(to);
+  const url = toUrl(to);
+  if (url === location.pathname + location.search) return render(to);
+  history[replace ? 'replaceState' : 'pushState']({}, '', url);
   return render(to);
 }
 

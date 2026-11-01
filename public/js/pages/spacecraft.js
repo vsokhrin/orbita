@@ -6,7 +6,7 @@ import { fmt } from '../format.js';
 import { pageHead, badge, button, colorDot, lamp } from '../ui/components.js';
 import { dataTable } from '../ui/table.js';
 import { spacecraftForm } from './forms.js';
-import { orbitClass } from '/shared/orbit.js';
+import { orbitClass } from '../../shared/orbit.js';
 
 export default async function spacecraftList() {
   const table = dataTable({

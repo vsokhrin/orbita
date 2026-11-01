@@ -32,6 +32,23 @@ export function setUnauthorizedHandler(fn) {
   onUnauthorized = fn;
 }
 
+// Транспорт: по умолчанию HTTP; демо-версия подменяет его обработчиком API внутри браузера.
+// Транспорт получает метод, адрес и тело запроса и возвращает { status, data }.
+async function httpTransport(method, url, body) {
+  const res = await fetch(url, {
+    method,
+    headers: body !== undefined ? { 'Content-Type': 'application/json', Accept: 'application/json' } : { Accept: 'application/json' },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+    credentials: 'same-origin',
+  });
+  if (res.status === 204) return { status: 204, data: null };
+  return { status: res.status, data: await res.json().catch(() => ({})) };
+}
+let transport = httpTransport;
+export function setTransport(fn) {
+  transport = fn;
+}
+
 function buildUrl(path, query) {
   if (!query) return path;
   const sp = new URLSearchParams();
@@ -43,17 +60,11 @@ function buildUrl(path, query) {
 async function request(method, path, { query, body, silent } = {}) {
   if (!silent) progress(1);
   try {
-    const res = await fetch(buildUrl(path, query), {
-      method,
-      headers: body !== undefined ? { 'Content-Type': 'application/json', Accept: 'application/json' } : { Accept: 'application/json' },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-      credentials: 'same-origin',
-    });
-    if (res.status === 204) return null;
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      if (res.status === 401 && onUnauthorized && !path.startsWith('/api/auth/login')) onUnauthorized();
-      throw new ApiError(res.status, data.error || `Ошибка ${res.status}`, data.details);
+    const { status, data } = await transport(method, buildUrl(path, query), body);
+    if (status === 204) return null;
+    if (status < 200 || status >= 300) {
+      if (status === 401 && onUnauthorized && !path.startsWith('/api/auth/login')) onUnauthorized();
+      throw new ApiError(status, data?.error || `Ошибка ${status}`, data?.details);
     }
     return data;
   } catch (err) {

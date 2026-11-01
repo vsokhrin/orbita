@@ -1,5 +1,6 @@
 // Декларативная валидация входных данных с приведением типов и русскими сообщениями.
-import { HttpError } from '../http/app.js';
+// Модуль без зависимостей от Node.js: используется и в демо-версии в браузере.
+import { HttpError } from '../http/errors.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -90,4 +91,11 @@ export function parseId(v) {
   const n = Number(v);
   if (!Number.isInteger(n) || n <= 0 || n > 2147483647) throw new HttpError(400, 'Некорректный идентификатор');
   return n;
+}
+
+export function validatePasswordStrength(pw) {
+  if (typeof pw !== 'string' || pw.length < 8) return 'Пароль должен быть не короче 8 символов';
+  if (pw.length > 128) return 'Пароль слишком длинный';
+  if (!/[A-Za-zА-Яа-яЁё]/.test(pw) || !/\d/.test(pw)) return 'Пароль должен содержать буквы и цифры';
+  return null;
 }

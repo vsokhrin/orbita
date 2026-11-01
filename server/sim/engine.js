@@ -1,9 +1,11 @@
 // Движок ЦУП: каждую секунду рассчитывает положение и состояние всех КА, сеансы связи
 // с наземными станциями, исполняет командную очередь, обнаруживает неисправности,
 // проводит запуски по расписанию и раздаёт поток телеметрии по SSE.
+// К данным обращается только через repo (sql-repo.js на сервере, memory-repo.js в демо-версии),
+// поэтому модуль не зависит от Node.js и работает и в браузере.
 import * as O from '../../shared/orbit.js';
 import { FAULTS, COMMAND_TYPES } from '../domain/dictionaries.js';
-import { SIMULATED_STATUSES, initialState, stationsForModel, step, osculatingAngles, fuelForAltitudeChange } from './model.js';
+import { SIMULATED_STATUSES, initialState, stationsForModel, step, osculatingAngles, fuelForAltitudeChange, telemetryRecord } from './model.js';
 
 const RANDOM_FAULTS = [
   ['seu', 0.55],
@@ -11,11 +13,18 @@ const RANDOM_FAULTS = [
   ['attitude', 0.15],
 ];
 
+/** Тексты уведомления и записи аудита об успешном запуске */
+const launchTexts = (l, sc) => ({
+  title: `Успешный запуск: ${l.name}`,
+  description: `Ракета-носитель «${l.vehicle}», космодром ${l.site}.` + (sc ? ` КА «${sc.name}» выведен на расчётную орбиту, телеметрия поступает.` : ''),
+  summary: `Запуск «${l.name}» выполнен`,
+});
+
 const round = (v, d = 1) => (v === null || v === undefined ? null : Math.round(v * 10 ** d) / 10 ** d);
 
 export class Engine {
-  constructor({ db, hub, logger, config }) {
-    this.db = db;
+  constructor({ repo, hub, logger, config }) {
+    this.repo = repo;
     this.hub = hub;
     this.log = logger;
     this.cfg = config;
@@ -37,11 +46,8 @@ export class Engine {
   async start() {
     await this.reloadFleet();
     await this.loadStates();
-    const recovered = await this.db.query(
-      `UPDATE commands SET status = 'failed', completed_at = now(), result = 'Квитанция не получена: перезапуск ЦУП'
-        WHERE status = 'uplinked'`,
-    );
-    if (recovered.rowCount) this.log.warn(`Команд без квитанции после перезапуска: ${recovered.rowCount}`);
+    const recovered = await this.repo.failUplinkedCommands('Квитанция не получена: перезапуск ЦУП');
+    if (recovered) this.log.warn(`Команд без квитанции после перезапуска: ${recovered}`);
     await this.refreshQueue();
     const every = (ms, fn) => this.timers.push(setInterval(() => this.safe(fn), ms));
     every(1000, () => this.tick());
@@ -75,7 +81,7 @@ export class Engine {
   // ---------- загрузка данных ----------
 
   async reloadFleet() {
-    const rows = await this.db.many(`SELECT * FROM spacecraft WHERE status <> 'lost' ORDER BY id`);
+    const rows = await this.repo.fleetRows();
     const next = new Map();
     for (const r of rows) {
       next.set(r.id, {
@@ -99,14 +105,12 @@ export class Engine {
     }
     for (const id of this.states.keys()) if (!next.get(id)?.simulated) this.states.delete(id);
     this.fleet = next;
-    this.stations = stationsForModel(await this.db.many('SELECT * FROM ground_stations ORDER BY id'));
+    this.stations = stationsForModel(await this.repo.stationRows());
     this.lastContacts = 0;
   }
 
   async loadStates() {
-    const rows = await this.db.many(
-      `SELECT DISTINCT ON (spacecraft_id) * FROM telemetry ORDER BY spacecraft_id, ts DESC`,
-    );
+    const rows = await this.repo.latestTelemetry();
     for (const r of rows) {
       const st = this.states.get(r.spacecraft_id);
       if (!st) continue;
@@ -116,7 +120,7 @@ export class Engine {
       st.pointing = r.pointing;
       st.payloadOn = r.payload_on;
     }
-    const open = await this.db.many(`SELECT spacecraft_id, kind FROM incidents WHERE status <> 'resolved' AND kind IS NOT NULL`);
+    const open = await this.repo.openFaultKinds();
     for (const { spacecraft_id: id, kind } of open) {
       const st = this.states.get(id);
       if (!st) continue;
@@ -126,7 +130,7 @@ export class Engine {
   }
 
   async refreshQueue() {
-    const rows = await this.db.many(`SELECT * FROM commands WHERE status = 'queued' ORDER BY created_at, id`);
+    const rows = await this.repo.queuedCommands();
     const q = new Map();
     for (const c of rows) {
       if (!q.has(c.spacecraft_id)) q.set(c.spacecraft_id, []);
@@ -201,15 +205,13 @@ export class Engine {
 
   async persist() {
     const rows = [];
-    const ts = new Date().toISOString();
+    const now = Date.now();
     for (const [id, v] of this.last) {
       if (v.inactive || !v.st) continue;
-      const st = v.st;
-      rows.push([id, ts, round(st.battery, 2), round(st.temperature, 2), round(v.generation, 1), v.signal === null ? null : round(v.signal, 1),
-        round(v.alt, 1), round(v.speed, 3), round(v.lat, 3), round(v.lon, 3), v.sunlit, v.rebooting ? 'reboot' : st.mode, st.pointing, st.payloadOn, v.link?.stationId ?? null]);
+      rows.push(telemetryRecord(id, now, v.st, v));
     }
     if (!rows.length) return;
-    await insertTelemetry(this.db, rows);
+    await this.repo.saveTelemetry(rows);
   }
 
   // ---------- неисправности и инциденты ----------
@@ -254,13 +256,13 @@ export class Engine {
     if (['battery_low', 'battery_critical', 'overheat'].includes(kind)) st.alarms.add(kind);
     const recommendation = f.fix ? ` Рекомендуемое действие: команда «${COMMAND_TYPES[f.fix].label}».` : '';
     this.safe(async () => {
-      const row = await this.db.one(
-        `INSERT INTO incidents (spacecraft_id, severity, source, kind, title, description)
-         VALUES ($1, $2, 'auto', $3, $4, $5)
-         ON CONFLICT (spacecraft_id, kind) WHERE status <> 'resolved' AND kind IS NOT NULL DO NOTHING
-         RETURNING *`,
-        [sc.id, f.severity, kind, `${sc.name}: ${f.title.charAt(0).toLowerCase()}${f.title.slice(1)}`, description + recommendation],
-      );
+      const row = await this.repo.createAutoIncident({
+        spacecraft_id: sc.id,
+        severity: f.severity,
+        kind,
+        title: `${sc.name}: ${f.title.charAt(0).toLowerCase()}${f.title.slice(1)}`,
+        description: description + recommendation,
+      });
       if (row) this.hub.broadcast('incident', { action: 'created', incident: { ...row, spacecraft_name: sc.name } });
     });
   }
@@ -271,11 +273,7 @@ export class Engine {
   }
 
   async resolveIncidents(scId, kind, userId, resolution) {
-    const rows = await this.db.many(
-      `UPDATE incidents SET status = 'resolved', resolved_at = now(), resolved_by = $3, resolution = $4
-        WHERE spacecraft_id = $1 AND kind = $2 AND status <> 'resolved' RETURNING *`,
-      [scId, kind, userId, resolution],
-    );
+    const rows = await this.repo.resolveAutoIncidents(scId, kind, userId, resolution);
     for (const row of rows) this.hub.broadcast('incident', { action: 'updated', incident: row });
     return rows;
   }
@@ -292,7 +290,7 @@ export class Engine {
     if (sc.status === status) return;
     sc.status = status;
     sc.simulated = SIMULATED_STATUSES.has(status);
-    await this.db.query('UPDATE spacecraft SET status = $2 WHERE id = $1', [sc.id, status]);
+    await this.repo.setSpacecraftStatus(sc.id, status);
     this.hub.broadcast('fleet', { reason: 'status', id: sc.id, status });
   }
 
@@ -303,11 +301,7 @@ export class Engine {
     if (!cmd) return;
     this.busy.add(sc.id);
     try {
-      const row = await this.db.one(
-        `UPDATE commands SET status = 'uplinked', uplinked_at = now(), station_id = $2
-          WHERE id = $1 AND status = 'queued' RETURNING *`,
-        [cmd.id, link.stationId],
-      );
+      const row = await this.repo.markUplinked(cmd.id, link.stationId);
       const list = this.queue.get(sc.id) || [];
       this.queue.set(sc.id, list.filter((c) => c.id !== cmd.id));
       if (!row) {
@@ -403,17 +397,14 @@ export class Engine {
           fail('Неизвестная команда');
       }
     }
-    const row = await this.db.one(
-      `UPDATE commands SET status = $2, completed_at = now(), result = $3 WHERE id = $1 RETURNING *`,
-      [cmd.id, ok ? 'executed' : 'failed', result],
-    );
+    const row = await this.repo.completeCommand(cmd.id, ok ? 'executed' : 'failed', result);
     if (row) this.hub.broadcast('command', { action: 'updated', command: row });
   }
 
   async correctOrbit(sc, cmd, fail) {
     const delta = Number(cmd.params?.delta_km || 0);
     const now = Date.now();
-    const row = await this.db.one('SELECT * FROM spacecraft WHERE id = $1', [sc.id]);
+    const row = await this.repo.getSpacecraft(sc.id);
     const newPerigee = Number(row.perigee_km) + delta;
     const newApogee = Number(row.apogee_km) + delta;
     if (newPerigee < 160) {
@@ -426,12 +417,15 @@ export class Engine {
       return '';
     }
     const ang = osculatingAngles(sc.el, now);
-    await this.db.query(
-      `UPDATE spacecraft SET perigee_km = $2, apogee_km = $3, raan_deg = $4, arg_perigee_deg = $5,
-              mean_anomaly_deg = $6, epoch = $7, fuel_kg = $8 WHERE id = $1`,
-      [sc.id, newPerigee.toFixed(1), newApogee.toFixed(1), ang.raanDeg.toFixed(3), ang.argpDeg.toFixed(3), ang.meanAnomalyDeg.toFixed(3),
-        new Date(now).toISOString(), (Number(row.fuel_kg) - fuel).toFixed(1)],
-    );
+    await this.repo.updateOrbit(sc.id, {
+      perigee_km: +newPerigee.toFixed(1),
+      apogee_km: +newApogee.toFixed(1),
+      raan_deg: +ang.raanDeg.toFixed(3) % 360,
+      arg_perigee_deg: +ang.argpDeg.toFixed(3) % 360,
+      mean_anomaly_deg: +ang.meanAnomalyDeg.toFixed(3) % 360,
+      epoch: new Date(now).toISOString(),
+      fuel_kg: +(Number(row.fuel_kg) - fuel).toFixed(1),
+    });
     await this.reloadFleet();
     this.hub.broadcast('fleet', { reason: 'orbit', id: sc.id });
     const sign = delta > 0 ? '+' : '';
@@ -442,35 +436,12 @@ export class Engine {
 
   async processLaunches() {
     // за 15 минут до старта — автоматическое решение о готовности
-    const ready = await this.db.many(
-      `UPDATE launches SET status = 'go' WHERE status = 'scheduled' AND scheduled_at <= now() + interval '15 minutes' RETURNING *`,
-    );
+    const ready = await this.repo.launchesToGo();
     for (const l of ready) this.hub.broadcast('launch', { action: 'updated', launch: l });
 
-    const due = await this.db.many(`SELECT * FROM launches WHERE status = 'go' AND scheduled_at <= now()`);
+    const due = await this.repo.dueLaunches();
     for (const launch of due) {
-      const result = await this.db.transaction(async (tx) => {
-        const l = await tx.one(`UPDATE launches SET status = 'success' WHERE id = $1 AND status = 'go' RETURNING *`, [launch.id]);
-        if (!l) return null;
-        let sc = null;
-        if (l.spacecraft_id) {
-          sc = await tx.one(
-            `UPDATE spacecraft SET status = 'active', launch_date = (now() AT TIME ZONE 'UTC')::date, epoch = now(), mean_anomaly_deg = 0
-              WHERE id = $1 AND status = 'planned' RETURNING *`,
-            [l.spacecraft_id],
-          );
-        }
-        const inc = await tx.one(
-          `INSERT INTO incidents (spacecraft_id, severity, source, title, description)
-           VALUES ($1, 'info', 'auto', $2, $3) RETURNING *`,
-          [sc?.id ?? null, `Успешный запуск: ${l.name}`, `Ракета-носитель «${l.vehicle}», космодром ${l.site}.` + (sc ? ` КА «${sc.name}» выведен на расчётную орбиту, телеметрия поступает.` : '')],
-        );
-        await tx.query(
-          `INSERT INTO audit_log (username, action, entity, entity_id, summary) VALUES ('система', 'launch', 'launch', $1, $2)`,
-          [String(l.id), `Запуск «${l.name}» выполнен`],
-        );
-        return { l, sc, inc };
-      });
+      const result = await this.repo.completeLaunch(launch.id, launchTexts);
       if (!result) continue;
       this.log.info(`Запуск выполнен: ${result.l.name}`);
       this.hub.broadcast('launch', { action: 'updated', launch: result.l });
@@ -485,10 +456,7 @@ export class Engine {
   // ---------- обслуживание ----------
 
   async housekeeping() {
-    const expired = await this.db.many(
-      `UPDATE commands SET status = 'expired', completed_at = now(), result = 'Срок действия истёк: не было сеанса связи'
-        WHERE status = 'queued' AND expires_at < now() RETURNING *`,
-    );
+    const expired = await this.repo.expireCommands('Срок действия истёк: не было сеанса связи');
     if (expired.length) {
       await this.refreshQueue();
       for (const c of expired) this.hub.broadcast('command', { action: 'updated', command: c });
@@ -496,8 +464,7 @@ export class Engine {
     const now = Date.now();
     if (now - this.lastRetention > 3600_000) {
       this.lastRetention = now;
-      await this.db.query(`DELETE FROM telemetry WHERE ts < now() - make_interval(hours => $1)`, [this.cfg.telemetryRetentionHours]);
-      await this.db.query(`DELETE FROM sessions WHERE expires_at < now()`);
+      await this.repo.prune(this.cfg.telemetryRetentionHours);
     }
     if (now - this.lastContacts > 60_000) {
       this.lastContacts = now;
@@ -564,19 +531,5 @@ export class Engine {
       lowBattery: items.filter((i) => i.battery < 30).length,
       faults: items.reduce((a, i) => a + i.faults.length, 0),
     };
-  }
-}
-
-export async function insertTelemetry(db, rows) {
-  const COLS = 15;
-  for (let start = 0; start < rows.length; start += 500) {
-    const chunk = rows.slice(start, start + 500);
-    const values = chunk.map((_, r) => '(' + Array.from({ length: COLS }, (_, c) => '$' + (r * COLS + c + 1)).join(',') + ')').join(',');
-    await db.query(
-      `INSERT INTO telemetry (spacecraft_id, ts, battery, temperature, power_w, signal_dbm, altitude_km, velocity_kms, lat, lon,
-                              sunlit, mode, pointing, payload_on, station_id)
-       VALUES ${values} ON CONFLICT DO NOTHING`,
-      chunk.flat(),
-    );
   }
 }

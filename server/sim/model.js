@@ -102,6 +102,29 @@ export function step(sc, st, t, dt, sun, stations, rand = Math.random) {
   };
 }
 
+const round = (v, d) => Math.round(v * 10 ** d) / 10 ** d;
+
+/** Запись для таблицы telemetry: состояние st и результат шага out в момент t (мс). */
+export function telemetryRecord(spacecraftId, t, st, out) {
+  return {
+    spacecraft_id: spacecraftId,
+    ts: new Date(t).toISOString(),
+    battery: round(st.battery, 2),
+    temperature: round(st.temperature, 2),
+    power_w: round(out.generation, 1),
+    signal_dbm: out.signal === null ? null : round(out.signal, 1),
+    altitude_km: round(out.alt, 1),
+    velocity_kms: round(out.speed, 3),
+    lat: round(out.lat, 3),
+    lon: round(out.lon, 3),
+    sunlit: out.sunlit,
+    mode: out.rebooting ? 'reboot' : st.mode,
+    pointing: st.pointing,
+    payload_on: st.payloadOn,
+    station_id: out.link?.stationId ?? null,
+  };
+}
+
 /** Средняя аномалия, RAAN и аргумент перигея на момент t — для пересчёта эпохи после манёвра. */
 export function osculatingAngles(el, t) {
   const dt = (t - el.epochMs) / 1000;

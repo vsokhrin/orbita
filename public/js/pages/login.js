@@ -3,8 +3,9 @@ import { h } from '../dom.js';
 import { api } from '../api.js';
 import { state } from '../state.js';
 import { WorldMap } from '../map/worldmap.js';
-import { subsolarPoint } from '/shared/orbit.js';
+import { subsolarPoint } from '../../shared/orbit.js';
 import { fmt } from '../format.js';
+import { DEMO } from '../base.js';
 
 export function renderLogin({ onSuccess, message }) {
   const mapBox = h('div', { class: 'login-map' });
@@ -52,6 +53,15 @@ export function renderLogin({ onSuccess, message }) {
     h('div', { class: 'field' }, h('label', { for: 'login-pass' }, 'Пароль'), pass),
     submit,
     state.meta?.demo ? demoAccounts(user, pass) : null,
+    DEMO
+      ? h(
+          'p',
+          { class: 'muted small', style: { margin: 0 } },
+          'Это демо-версия: сервер ЦУП работает прямо в вашем браузере, данные хранятся только в нём. Полная версия — Node.js и PostgreSQL в Docker, ',
+          h('a', { href: 'https://github.com/vsokhrin/orbita', target: '_blank', rel: 'noopener' }, 'исходный код на GitHub'),
+          '.',
+        )
+      : null,
   );
 
   const el = h(

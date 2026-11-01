@@ -5,6 +5,7 @@ import { validate, parseId } from './validate.js';
 import { audit, diff } from './audit.js';
 import { toCsv } from './csv.js';
 import { requireAuth, canEdit, adminOnly } from '../auth/sessions.js';
+import { paging } from '../domain/schemas.js';
 
 const escapeLike = (s) => s.replace(/[\\%_]/g, (m) => '\\' + m);
 
@@ -47,11 +48,22 @@ export function buildWhere(def, query, startIndex = 1) {
   return { sql: where.length ? 'WHERE ' + where.join(' AND ') : '', params, next: i };
 }
 
+/** SQL-выражение для поля сортировки: 'поле' или ['поле', [порядок значений]] */
+function sortExpr(spec) {
+  if (!Array.isArray(spec)) return spec;
+  const [column, rank] = spec;
+  if (!rank.every((v) => /^\w+$/.test(v))) throw new Error('Недопустимое значение в порядке сортировки');
+  return `array_position(ARRAY[${rank.map((v) => `'${v}'`).join(',')}], ${column})`;
+}
+
 export function buildOrder(def, query) {
-  const col = def.sortable?.[query.sort];
-  if (!col) return 'ORDER BY ' + (def.defaultSort || 'id DESC');
+  const spec = def.sortable?.[query.sort];
+  if (!spec) {
+    const parts = (def.defaultSort || [['id', 'desc']]).map(([column, dir, rank]) => `${sortExpr(rank ? [column, rank] : column)} ${dir === 'desc' ? 'DESC' : 'ASC'} NULLS LAST`);
+    return 'ORDER BY ' + parts.join(', ') + ', id';
+  }
   const dir = query.dir === 'desc' ? 'DESC' : 'ASC';
-  return `ORDER BY ${col} ${dir} NULLS LAST, id ${dir}`;
+  return `ORDER BY ${sortExpr(spec)} ${dir} NULLS LAST, id ${dir}`;
 }
 
 export function resource(app, db, def) {
@@ -64,12 +76,11 @@ export function resource(app, db, def) {
 
   // Список
   app.get(path, requireAuth, async (req) => {
-    const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
-    const limit = Math.min(500, Math.max(1, Number.parseInt(req.query.limit, 10) || 25));
+    const { page, limit, offset } = paging(req.query);
     const where = buildWhere(def, req.query);
     const rows = await db.many(
       `SELECT q.*, count(*) OVER() AS _total FROM (${select}) q ${where.sql} ${buildOrder(def, req.query)}
-       LIMIT ${limit} OFFSET ${(page - 1) * limit}`,
+       LIMIT ${limit} OFFSET ${offset}`,
       where.params,
     );
     const total = rows[0]?._total ?? 0;
@@ -100,6 +111,7 @@ export function resource(app, db, def) {
   // Создание
   app.post(path, writeGuard, async (req, res) => {
     const values = validate(schema, req.body);
+    def.check?.(values, null);
     if (def.beforeSave) await def.beforeSave(values, null, req);
     const row = await db.transaction(async (tx) => {
       const cols = Object.keys(values);
@@ -125,6 +137,7 @@ export function resource(app, db, def) {
       if (req.body._version && before.updated_at && req.body._version !== before.updated_at) {
         throw new HttpError(409, 'Запись уже изменил другой пользователь. Обновите страницу и повторите правку.');
       }
+      def.check?.(values, before);
       if (def.beforeSave) await def.beforeSave(values, before, req);
       const changes = diff(before, values);
       if (Object.keys(changes).length) {

@@ -1,8 +1,8 @@
 // Карта орбит: равнопромежуточная проекция на canvas.
 // Слои: океан, ночная сторона с сумерками, точечная матрица суши (подсвечена Солнцем), сетка,
 // зоны видимости станций, трассы КА, зона обзора выбранного КА, радиолинии станция—КА, маркеры и подписи.
-import * as O from '/shared/orbit.js';
-import { landPoints } from '/shared/landmask.js';
+import * as O from '../../shared/orbit.js';
+import { landPoints } from '../../shared/landmask.js';
 
 const COLORS = {
   ocean: '#0e1b26',

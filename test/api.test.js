@@ -100,6 +100,51 @@ t('без входа данные закрыты', async () => {
   for (const p of ['/api/dashboard', '/api/spacecraft', '/api/stream', '/api/users']) assert.equal((await c.get(p)).status, 401, p);
 });
 
+t('демо-версия для GitHub Pages отвечает так же, как сервер', async () => {
+  const { createBackend } = await import('../demo/backend.js');
+  const demo = await createBackend({ run: false, logger: { info() {}, warn() {}, error: console.error } });
+  const c = client();
+  await c.login('admin', 'admin2026');
+  assert.equal((await demo.request('POST', '/api/auth/login', { username: 'admin', password: 'admin2026' })).status, 200);
+
+  // структура ответов: те же поля и типы значений (null совместим с любым типом)
+  const kind = (v) => (v === null ? null : Array.isArray(v) ? 'array' : typeof v);
+  const diffs = [];
+  const compare = (where, a, b) => {
+    const [ka, kb] = [kind(a), kind(b)];
+    if (ka === null || kb === null) return;
+    if (ka !== kb) return diffs.push(`${where}: ${ka} ≠ ${kb}`);
+    if (ka === 'array') return a.length && b.length ? compare(where + '[0]', a[0], b[0]) : undefined;
+    if (ka !== 'object') return;
+    if (!/\.(fleet|missions|stations|incidents|byType|byStatus|byOrbit)$/.test(where)) {
+      const missing = Object.keys(a).filter((k) => !(k in b));
+      const extra = Object.keys(b).filter((k) => !(k in a));
+      if (missing.length || extra.length) diffs.push(`${where}: нет [${missing}], лишние [${extra}]`);
+    }
+    for (const k of Object.keys(a)) if (k in b) compare(`${where}.${k}`, a[k], b[k]);
+  };
+  const paths = ['/api/meta', '/api/auth/me', '/api/dashboard', '/api/search?q=со', '/api/spacecraft', '/api/spacecraft/1', '/api/spacecraft/1/telemetry?hours=6',
+    '/api/spacecraft/3/passes?hours=12', '/api/stations', '/api/stations/1', '/api/stations/1/schedule?hours=12', '/api/missions', '/api/missions/1', '/api/crew',
+    '/api/crew/1', '/api/launches', '/api/launches/1', '/api/incidents', '/api/incidents/1', '/api/commands', '/api/commands/1', '/api/reports/summary',
+    '/api/users', '/api/audit', '/api/spacecraft/999', '/api/nope'];
+  for (const path of paths) {
+    const [srv, dem] = [await c.get(path), await demo.request('GET', path)];
+    assert.equal(dem.status, srv.status, path);
+    compare(path, srv.data, dem.data);
+  }
+  assert.deepEqual(diffs, []);
+
+  // порядок записей по умолчанию и при сортировке — как у SQL
+  const order = async (path, f) => assert.deepEqual((await demo.request('GET', path)).data.items.map(f), (await c.get(path)).data.items.map(f), path);
+  await order('/api/missions?limit=50', (m) => m.code);
+  await order('/api/missions?sort=priority&dir=desc&limit=50', (m) => m.code);
+  await order('/api/crew?limit=50', (m) => m.full_name);
+  await order('/api/launches?limit=50', (l) => l.name);
+  await order('/api/spacecraft?sort=name&limit=50', (s) => s.name);
+  await order('/api/incidents?limit=15', (i) => i.title);
+  await order('/api/users', (u) => u.username);
+});
+
 t('вход: неверный пароль, успешный вход, выход', async () => {
   const c = client();
   assert.equal((await c.login('admin', 'nope')).status, 401);

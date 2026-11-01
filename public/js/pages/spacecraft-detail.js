@@ -10,7 +10,7 @@ import { timeSeries, simpleTable } from '../ui/charts.js';
 import { WorldMap } from '../map/worldmap.js';
 import { spacecraftForm } from './forms.js';
 import { commandDialog } from './command-dialog.js';
-import { periodMinutes, elementsFrom } from '/shared/orbit.js';
+import { periodMinutes, elementsFrom } from '../../shared/orbit.js';
 
 export default async function spacecraftDetail({ params, scope }) {
   const sc = await api.get(`/api/spacecraft/${params.id}`);

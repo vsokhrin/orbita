@@ -1,4 +1,10 @@
 // Живой поток ЦУП (Server-Sent Events): телеметрия, инциденты, команды, запуски, изменения флота.
+// Источник событий можно подменить: демо-версия отдаёт поток из «сервера» внутри браузера.
+let streamFactory = () => new EventSource('/api/stream');
+export function setStreamFactory(fn) {
+  streamFactory = fn;
+}
+
 class LiveStream extends EventTarget {
   constructor() {
     super();
@@ -11,7 +17,7 @@ class LiveStream extends EventTarget {
   connect() {
     if (this.source) return;
     this.setState('connecting');
-    const es = new EventSource('/api/stream');
+    const es = streamFactory();
     this.source = es;
     es.onopen = () => this.setState('online');
     es.onerror = () => this.setState(es.readyState === EventSource.CLOSED ? 'offline' : 'connecting');

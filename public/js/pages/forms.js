@@ -4,7 +4,7 @@ import { api } from '../api.js';
 import { options, state } from '../state.js';
 import { openForm, setValues } from '../ui/form.js';
 import { button } from '../ui/components.js';
-import { periodMinutes, elementsFrom, orbitClass, meanAnomalyForLongitude } from '/shared/orbit.js';
+import { periodMinutes, elementsFrom, orbitClass, meanAnomalyForLongitude } from '../../shared/orbit.js';
 import { fmt } from '../format.js';
 
 const ORBIT_PRESETS = [

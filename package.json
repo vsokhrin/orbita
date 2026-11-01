@@ -13,7 +13,10 @@
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
     "test": "node --test --test-concurrency=1 \"test/*.test.js\"",
-    "landmask": "node scripts/build-landmask.mjs"
+    "landmask": "node scripts/build-landmask.mjs",
+    "pages:build": "node scripts/build-pages.mjs",
+    "pages:serve": "node scripts/serve-pages.mjs",
+    "demo": "node scripts/build-pages.mjs && node scripts/serve-pages.mjs"
   },
   "dependencies": {},
   "devDependencies": {}

@@ -13,6 +13,7 @@ import { serveStatic, spaFallback } from './http/static.js';
 import { SseHub } from './http/sse.js';
 import { loadSession, sameOriginGuard } from './auth/sessions.js';
 import { Engine } from './sim/engine.js';
+import { SqlRepo } from './sim/sql-repo.js';
 import { authRoutes } from './routes/auth.js';
 import { systemRoutes } from './routes/system.js';
 import { entityRoutes } from './routes/entities.js';
@@ -49,7 +50,7 @@ async function connectWithRetry(pool, attempts = 30) {
 
 export async function buildServer({ db, withEngine = config.simulation } = {}) {
   const hub = new SseHub();
-  const engine = new Engine({ db, hub, logger, config });
+  const engine = new Engine({ repo: new SqlRepo(db), hub, logger, config });
   const app = createApp({ trustProxy: config.trustProxy });
 
   app.use((req, res) => {

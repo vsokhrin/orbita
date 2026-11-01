@@ -2,10 +2,10 @@
    Зал светлый, экраны тёмные: интерфейс окрашен в матовую эмаль приборных пультов ЦУП,
    данные в реальном времени живут на утопленных «экранах». Транспаранты загораются только по делу. */
 
-@font-face { font-family: 'Inter'; font-weight: 400; font-display: swap; src: url('/assets/fonts/inter-400.woff') format('woff'); }
-@font-face { font-family: 'Inter'; font-weight: 500; font-display: swap; src: url('/assets/fonts/inter-500.woff') format('woff'); }
-@font-face { font-family: 'Inter'; font-weight: 600 700; font-display: swap; src: url('/assets/fonts/inter-600.woff') format('woff'); }
-@font-face { font-family: 'Inter Display'; font-weight: 600; font-display: swap; src: url('/assets/fonts/inter-display-600.woff') format('woff'); }
+@font-face { font-family: 'Inter'; font-weight: 400; font-display: swap; src: url('../assets/fonts/inter-400.woff') format('woff'); }
+@font-face { font-family: 'Inter'; font-weight: 500; font-display: swap; src: url('../assets/fonts/inter-500.woff') format('woff'); }
+@font-face { font-family: 'Inter'; font-weight: 600 700; font-display: swap; src: url('../assets/fonts/inter-600.woff') format('woff'); }
+@font-face { font-family: 'Inter Display'; font-weight: 600; font-display: swap; src: url('../assets/fonts/inter-display-600.woff') format('woff'); }
 
 :root {
   color-scheme: light;
@@ -160,6 +160,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .nav a svg { flex: none; opacity: 0.85; }
 .nav .count { margin-left: auto; font-size: 11px; font-weight: 600; min-width: 20px; text-align: center; padding: 1px 6px; border-radius: 9px; background: var(--crit); color: #fff; font-variant-numeric: tabular-nums; }
 .sidebar-foot { margin-top: auto; padding: 12px 18px 16px; border-top: 1px solid var(--rule); font-size: 12px; color: var(--ink-3); }
+.demo-actions { display: flex; gap: 14px; margin-top: 6px; }
+.boot-splash { min-height: 100vh; display: grid; place-content: center; justify-items: center; gap: 14px; color: var(--ink-3); font-size: 14px; }
+.demo-actions button { all: unset; cursor: pointer; color: var(--link); }
+.demo-actions button:hover, .demo-actions button:focus-visible { text-decoration: underline; }
 
 .main { min-width: 0; display: flex; flex-direction: column; }
 .topbar {

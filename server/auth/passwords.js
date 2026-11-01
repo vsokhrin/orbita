@@ -36,9 +36,4 @@ export async function dummyVerify(password) {
   return false;
 }
 
-export function validatePasswordStrength(pw) {
-  if (typeof pw !== 'string' || pw.length < 8) return 'Пароль должен быть не короче 8 символов';
-  if (pw.length > 128) return 'Пароль слишком длинный';
-  if (!/[A-Za-zА-Яа-яЁё]/.test(pw) || !/\d/.test(pw)) return 'Пароль должен содержать буквы и цифры';
-  return null;
-}
+export { validatePasswordStrength } from '../lib/validate.js';

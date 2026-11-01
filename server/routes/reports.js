@@ -1,17 +1,11 @@
 // Аналитические отчёты за период: инциденты, команды, флот, загрузка станций.
 import { requireAuth } from '../auth/sessions.js';
 import { orbitClass } from '../../shared/orbit.js';
-
-function range(query) {
-  const to = query.to && !Number.isNaN(Date.parse(query.to)) ? new Date(query.to) : new Date();
-  const from = query.from && !Number.isNaN(Date.parse(query.from)) ? new Date(query.from) : new Date(to.getTime() - 30 * 86_400_000);
-  if (to - from > 366 * 86_400_000) from.setTime(to.getTime() - 366 * 86_400_000);
-  return { from: from.toISOString(), to: to.toISOString() };
-}
+import { reportRange } from '../domain/schemas.js';
 
 export function reportRoutes(app, { db, engine }) {
   app.get('/api/reports/summary', requireAuth, async (req) => {
-    const { from, to } = range(req.query);
+    const { from, to } = reportRange(req.query);
     const p = [from, to];
     const [byDay, bySpacecraft, mttr, cmdStatus, cmdType, fleet, missions, stationUplinks, totals] = await Promise.all([
       db.many(

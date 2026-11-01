@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+    branches-ignore: [gh-pages]
   pull_request:
 
 jobs:
@@ -28,11 +29,13 @@ jobs:
         with:
           node-version: 22
       - name: Проверка синтаксиса
-        run: for f in $(find server shared public/js -name '*.js'); do node --check "$f"; done
+        run: for f in $(find server shared public/js demo scripts -name '*.js' -o -name '*.mjs'); do node --check "$f"; done
       - name: Тесты
         run: npm test
         env:
           TEST_DATABASE_URL: postgres://orbita:orbita@127.0.0.1:5432/orbita_test
+      - name: Сборка демо-версии для GitHub Pages
+        run: node scripts/build-pages.mjs
 
   docker:
     name: Сборка и запуск Docker Compose
